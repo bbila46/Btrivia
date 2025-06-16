@@ -21,22 +21,22 @@ XP_ROLES = [
     (750, "🌟🏄 Legendary Surf Medic"),
 ]
 
-QUESTIONS = [
+CASES = [
     {
-        "question": "What is the best way to protect your skin from the sun?",
-        "choices": ["A) Sunscreen", "B) Tanning bed", "C) No protection", "D) Water"],
-        "answer": "A"
+        "case_id": 1,
+        "description": "🏝️ A child at the beach suddenly begins to scream in pain. His leg shows red tentacle-like marks, and he’s panicking from the sting. What’s your diagnosis?",
+        "answer": "jellyfish sting"
     },
     {
-        "question": "Which jellyfish sting is the most painful?",
-        "choices": ["A) Moon Jellyfish", "B) Box Jellyfish", "C) Bluebottle", "D) Lion's Mane"],
-        "answer": "B"
+        "case_id": 2,
+        "description": "☀️ A teenager collapses after playing volleyball. He's dizzy, has dry skin, and feels extremely hot. What’s your diagnosis?",
+        "answer": "heat stroke"
     },
     {
-        "question": "What is the common cause of sunburn?",
-        "choices": ["A) UV rays", "B) Water", "C) Sand", "D) Salt"],
-        "answer": "A"
-    },
+        "case_id": 3,
+        "description": "🌊 A surfer is pulled underwater and later found coughing, confused, and breathing strangely. What’s the likely diagnosis?",
+        "answer": "near drowning"
+    }
 ]
 
 XP_PER_CORRECT = 25
@@ -96,93 +96,50 @@ async def on_ready():
     except Exception as e:
         print(f"Error syncing commands: {e}")
 
-@bot.tree.command(name="beachtrivia", description="Start a beach trivia quiz")
-async def beachtrivia(interaction: discord.Interaction):
-    user_id = str(interaction.user.id)
-    if user_id in active_sessions:
-        await interaction.response.send_message("You're already in an active trivia session! Please answer the current question.", ephemeral=True)
+@bot.tree.command(name="beachcase", description="Post a beach emergency case for players to guess!")
+async def beachcase(interaction: discord.Interaction):
+    # Pick the next unsolved case
+    case = next((c for c in CASES if str(c["case_id"]) not in active_cases), None)
+    if not case:
+        await interaction.response.send_message("All cases have already been solved!", ephemeral=True)
         return
-    active_sessions[user_id] = 0
-    embed = discord.Embed(
-        title="🏖️ Welcome to BeachTrivia! 🏖️",
-        description="Get ready for a fun beach-themed trivia quiz! For every correct answer, you earn 25 XP and climb the ranks.\nLet's start!",
-        color=discord.Color.orange()
+
+    case_embed = discord.Embed(
+        title=f"🔍 CASE {case['case_id']:03d} - ONGOING",
+        description=case["description"] + "\n\n💬 **Guess the emergency by replying in chat!**",
+        color=discord.Color.orange(),
+        timestamp=datetime.utcnow()
     )
-    embed.set_thumbnail(url="https://cdn-icons-png.flaticon.com/512/685/685686.png")
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-    await send_question(interaction.channel, interaction.user)
+    await interaction.response.send_message(embed=case_embed)
 
-async def send_question(channel, user):
-    user_id = str(user.id)
-    idx = active_sessions[user_id]
-    question = QUESTIONS[idx]
-
-    case_num = idx + 1
-    case_title = f"🔍 `CASE {case_num:03d} - {'ONGOING' if idx < len(QUESTIONS)-1 else 'FINAL'}`"
-
-    embed = discord.Embed(
-        title=case_title,
-        description=f"**Question:**\n{question['question']}",
-        color=discord.Color.gold()
-    )
-    
-    # Format choices as a bullet list
-    choices_text = "\n".join(f"{choice}" for choice in question["choices"])
-    embed.add_field(name="Choices", value=choices_text, inline=False)
-    
-    embed.set_footer(text="Reply with A, B, C, or D")
-
-    trivia_msg = await channel.send(f"{user.mention}", embed=embed)
-
-    def check(m: discord.Message):
+    # Listen for guesses
+    def check(m):
         return (
-            m.author == user and
-            m.channel == channel and
-            m.content.upper() in ["A", "B", "C", "D"]
+            m.channel == interaction.channel
+            and m.content.lower().strip() == case["answer"].lower()
+            and str(case["case_id"]) not in active_cases
         )
 
     try:
-        msg = await bot.wait_for('message', timeout=60.0, check=check)
-    except asyncio.TimeoutError:
-        await channel.send(f"{user.mention} Time's up! The trivia session has ended.")
-        active_sessions.pop(user_id, None)
-        return
+        msg = await bot.wait_for("message", timeout=600.0, check=check)
+        active_cases[str(case["case_id"])] = msg.author.id
+        add_xp(str(msg.author.id), XP_PER_CORRECT)
 
-    if msg.content.upper() == question["answer"]:
-        add_xp(user_id, XP_PER_CORRECT)
-        new_xp = get_user_xp(user_id)
-        role_name = get_role_for_xp(new_xp)
-
-        # Show a “SOLVED” style embed
         solved_embed = discord.Embed(
-            title=f"✅ `CASE {case_num:03d} - SOLVED`",
+            title=f"✅ CASE {case['case_id']:03d} - SOLVED",
+            description=f"Correct Diagnosis: **{case['answer'].title()}**",
             color=discord.Color.green()
         )
         solved_embed.add_field(
-            name="🎉 Correct Path:",
-            value=f"Your answer `{msg.content.upper()}` was correct! You earned {XP_PER_CORRECT} XP.\n"
-                  f"Your total XP is now {new_xp}.\n"
-                  f"Your current rank: {role_name}",
+            name="🎉 Winner",
+            value=f"Congrats {msg.author.mention}! You were the first to solve this case!\n🎁 DM me to claim your **Jellycat** plushie.",
             inline=False
         )
-        # Congratulate first correct answer (optional enhancement - omitted here for brevity)
-        await channel.send(f"{user.mention}", embed=solved_embed)
-    else:
-        # Show a “failed attempt” style message with correct answer
-        await channel.send(
-            f"❌ {user.mention} Oops, wrong answer. The correct answer was `{question['answer']}`."
-        )
+        solved_embed.set_footer(text="CASE closed. Stay tuned for the next one!")
+        await interaction.channel.send(embed=solved_embed)
 
-    if idx + 1 < len(QUESTIONS):
-        active_sessions[user_id] = idx + 1
-        # Teaser for next case
-        await channel.send(
-            f"**`CASE {case_num + 1:03d}`** will be posted soon. Stay sharp 👀"
-        )
-        await send_question(channel, user)
-    else:
-        await channel.send(f"{user.mention} You've completed the Beach Trivia! Thanks for playing. 🏖️")
-        active_sessions.pop(user_id, None)
+    except asyncio.TimeoutError:
+        await interaction.channel.send(f"❌ Time's up! No one solved CASE {case['case_id']:03d}. The answer was `{case['answer']}`.")
 
 @bot.tree.command(name="leaderboard", description="Show the Beach Trivia XP leaderboard")
 async def leaderboard(interaction: discord.Interaction):
