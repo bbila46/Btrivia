@@ -116,14 +116,22 @@ async def send_question(channel, user):
     user_id = str(user.id)
     idx = active_sessions[user_id]
     question = QUESTIONS[idx]
+
+    case_num = idx + 1
+    case_title = f"🔍 `CASE {case_num:03d} - {'ONGOING' if idx < len(QUESTIONS)-1 else 'FINAL'}`"
+
     embed = discord.Embed(
-        title=f"Question {idx + 1}",
-        description=question["question"],
+        title=case_title,
+        description=f"**Question:**\n{question['question']}",
         color=discord.Color.gold()
     )
+    
+    # Format choices as a bullet list
+    choices_text = "\n".join(f"{choice}" for choice in question["choices"])
+    embed.add_field(name="Choices", value=choices_text, inline=False)
+    
     embed.set_footer(text="Reply with A, B, C, or D")
-    choices_text = "\n".join(question["choices"])
-    embed.add_field(name="Choices:", value=choices_text, inline=False)
+
     trivia_msg = await channel.send(f"{user.mention}", embed=embed)
 
     def check(m: discord.Message):
@@ -132,6 +140,7 @@ async def send_question(channel, user):
             m.channel == channel and
             m.content.upper() in ["A", "B", "C", "D"]
         )
+
     try:
         msg = await bot.wait_for('message', timeout=60.0, check=check)
     except asyncio.TimeoutError:
@@ -143,15 +152,36 @@ async def send_question(channel, user):
         add_xp(user_id, XP_PER_CORRECT)
         new_xp = get_user_xp(user_id)
         role_name = get_role_for_xp(new_xp)
-        await channel.send(f"Correct, {user.mention}! You earned 25 XP. Total XP: {new_xp}. Your current rank: {role_name}")
+
+        # Show a “SOLVED” style embed
+        solved_embed = discord.Embed(
+            title=f"✅ `CASE {case_num:03d} - SOLVED`",
+            color=discord.Color.green()
+        )
+        solved_embed.add_field(
+            name="🎉 Correct Path:",
+            value=f"Your answer `{msg.content.upper()}` was correct! You earned {XP_PER_CORRECT} XP.\n"
+                  f"Your total XP is now {new_xp}.\n"
+                  f"Your current rank: {role_name}",
+            inline=False
+        )
+        # Congratulate first correct answer (optional enhancement - omitted here for brevity)
+        await channel.send(f"{user.mention}", embed=solved_embed)
     else:
-        await channel.send(f"Oops, wrong answer, {user.mention}. The correct answer was {question['answer']}.")
+        # Show a “failed attempt” style message with correct answer
+        await channel.send(
+            f"❌ {user.mention} Oops, wrong answer. The correct answer was `{question['answer']}`."
+        )
 
     if idx + 1 < len(QUESTIONS):
         active_sessions[user_id] = idx + 1
+        # Teaser for next case
+        await channel.send(
+            f"**`CASE {case_num + 1:03d}`** will be posted soon. Stay sharp 👀"
+        )
         await send_question(channel, user)
     else:
-        await channel.send(f"{user.mention} You've completed the Beach Trivia! Thanks for playing.")
+        await channel.send(f"{user.mention} You've completed the Beach Trivia! Thanks for playing. 🏖️")
         active_sessions.pop(user_id, None)
 
 @bot.tree.command(name="leaderboard", description="Show the Beach Trivia XP leaderboard")
